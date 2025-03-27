@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  MyRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: MyDatabase
+      Engine: mysql
+      MasterUsername: admin
+      MasterUserPassword: mypassword
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref MyDBSecurityGroup
+
+  MyDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Lambda to access RDS
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0 # Change to restrict access
+
+  MyLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaRDSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+
+  MyLambdaGetFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MyLambdaGet
+      Handler: index.getHandler
+      Runtime: nodejs18.x
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: my-lambda-bucket
+        S3Key: my-lambda-code.zip
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt MyRDSInstance.Endpoint.Address
+          DB_USER: admin
+          DB_PASS: mypassword
+          DB_NAME: mydatabase
+
+  MyLambdaPostFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MyLambdaPost
+      Handler: index.postHandler
+      Runtime: nodejs18.x
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: my-lambda-bucket
+        S3Key: my-lambda-code.zip
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt MyRDSInstance.Endpoint.Address
+          DB_USER: admin
+          DB_PASS: mypassword
+          DB_NAME: mydatabase
+
+  MyLambdaPutFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MyLambdaPut
+      Handler: index.putHandler
+      Runtime: nodejs18.x
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: my-lambda-bucket
+        S3Key: my-lambda-code.zip
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt MyRDSInstance.Endpoint.Address
+          DB_USER: admin
+          DB_PASS: mypassword
+          DB_NAME: mydatabase
+
+  MyLambdaDeleteFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MyLambdaDelete
+      Handler: index.deleteHandler
+      Runtime: nodejs18.x
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: my-lambda-bucket
+        S3Key: my-lambda-code.zip
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt MyRDSInstance.Endpoint.Address
+          DB_USER: admin
+          DB_PASS: mypassword
+          DB_NAME: mydatabase
+
+  MyAPIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyAPI
+
+  MyAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt MyAPIGateway.RootResourceId
+      PathPart: lambda
+      RestApiId: !Ref MyAPIGateway
+
+  MyAPIGatewayMethodGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      ResourceId: !Ref MyAPIGatewayResource
+      RestApiId: !Ref MyAPIGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - { LambdaArn: !GetAtt MyLambdaGetFunction.Arn }
+
+  MyAPIGatewayMethodPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref MyAPIGatewayResource
+      RestApiId: !Ref MyAPIGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - { LambdaArn: !GetAtt MyLambdaPostFunction.Arn }
+
+  MyAPIGatewayMethodPUT:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PUT
+      ResourceId: !Ref MyAPIGatewayResource
+      RestApiId: !Ref MyAPIGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - { LambdaArn: !GetAtt MyLambdaPutFunction.Arn }
+
+  MyAPIGatewayMethodDELETE:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: DELETE
+      ResourceId: !Ref MyAPIGatewayResource
+      RestApiId: !Ref MyAPIGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - { LambdaArn: !GetAtt MyLambdaDeleteFunction.Arn }
+
+  MyLambdaApiGatewayPermissionGET:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MyLambdaGetFunction
+      Principal: apigateway.amazonaws.com
+
+  MyLambdaApiGatewayPermissionPOST:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MyLambdaPostFunction
+      Principal: apigateway.amazonaws.com
+
+  MyLambdaApiGatewayPermissionPUT:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MyLambdaPutFunction
+      Principal: apigateway.amazonaws.com
+
+  MyLambdaApiGatewayPermissionDELETE:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MyLambdaDeleteFunction
+      Principal: apigateway.amazonaws.com
